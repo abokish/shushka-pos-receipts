@@ -1,44 +1,55 @@
+using ShushkaReceipt.Config;
 using ShushkaReceipt.Services;
 
 namespace ShushkaReceipt.Tests;
 
 public class ThermalPrinterServiceTests
 {
+    private static ThermalPrinterService Make(string printerName) =>
+        new(new ShushkaConfig { ThermalPrinterName = printerName });
+
     [Fact]
     public void IsConfigured_EmptyName_ReturnsFalse()
     {
-        var svc = new ThermalPrinterService("");
-        Assert.False(svc.IsConfigured);
+        Assert.False(Make("").IsConfigured);
     }
 
     [Fact]
     public void IsConfigured_WhitespaceName_ReturnsFalse()
     {
-        var svc = new ThermalPrinterService("   ");
-        Assert.False(svc.IsConfigured);
+        Assert.False(Make("   ").IsConfigured);
     }
 
     [Fact]
     public void IsConfigured_NonEmptyName_ReturnsTrue()
     {
-        var svc = new ThermalPrinterService("EPSON TM-T20III");
-        Assert.True(svc.IsConfigured);
+        Assert.True(Make("EPSON TM-T20III").IsConfigured);
     }
 
     [Fact]
     public void PrintRaw_NotConfigured_ReturnsFalseWithoutThrowing()
     {
-        var svc = new ThermalPrinterService("");
-        bool result = svc.PrintRaw([0x1B, 0x40]); // ESC @ init
-        Assert.False(result);
+        Assert.False(Make("").PrintRaw([0x1B, 0x40]));
     }
 
     [Fact]
     public void PrintRaw_NonExistentPrinter_ReturnsFalseWithoutThrowing()
     {
-        // Win32 OpenPrinter fails for a name that doesn't exist → PrintRaw returns false
-        var svc = new ThermalPrinterService("__NonExistentPrinter__XYZ__");
-        bool result = svc.PrintRaw([0x41, 0x42]); // "AB"
-        Assert.False(result);
+        Assert.False(Make("__NonExistentPrinter__XYZ__").PrintRaw([0x41, 0x42]));
+    }
+
+    [Fact]
+    public void IsConfigured_ReflectsLiveConfigChange()
+    {
+        // Changing ThermalPrinterName on the config should be reflected immediately
+        var config = new ShushkaConfig { ThermalPrinterName = "" };
+        var svc = new ThermalPrinterService(config);
+        Assert.False(svc.IsConfigured);
+
+        config.ThermalPrinterName = "EPSON TM-T20III";
+        Assert.True(svc.IsConfigured);
+
+        config.ThermalPrinterName = "";
+        Assert.False(svc.IsConfigured);
     }
 }

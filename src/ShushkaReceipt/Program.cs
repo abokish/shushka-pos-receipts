@@ -25,11 +25,16 @@ builder.Services.AddSingleton<FileJobLogger>(sp =>
     return new FileJobLogger(config.LogFilePath, config.LogMaxSizeBytes);
 });
 
+// ThermalPrinterService reads ThermalPrinterName from the live config
+// so settings changes take effect immediately.
 builder.Services.AddSingleton<ThermalPrinterService>(sp =>
-{
-    var config = sp.GetRequiredService<ShushkaConfig>();
-    return new ThermalPrinterService(config.ThermalPrinterName);
-});
+    new ThermalPrinterService(sp.GetRequiredService<ShushkaConfig>()));
+
+// AppSettingsWriter persists settings changes back to appsettings.json.
+builder.Services.AddSingleton<AppSettingsWriter>(sp =>
+    new AppSettingsWriter(
+        Path.Combine(AppContext.BaseDirectory, "appsettings.json"),
+        sp.GetRequiredService<ShushkaConfig>()));
 
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddHostedService<TrayAndHotkeyService>();

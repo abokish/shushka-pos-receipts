@@ -1,10 +1,13 @@
 using System.Runtime.InteropServices;
+using ShushkaReceipt.Config;
 
 namespace ShushkaReceipt.Services;
 
 /// <summary>
 /// Forwards raw ESC/POS bytes directly to a Windows printer via Win32.
 /// No GDI rendering — identical to what WritePrinter-based POS software does.
+/// Reads ThermalPrinterName from the live ShushkaConfig so settings changes
+/// take effect immediately without restarting.
 /// </summary>
 public sealed class ThermalPrinterService
 {
@@ -38,14 +41,14 @@ public sealed class ThermalPrinterService
         public string pDataType;
     }
 
-    private readonly string _printerName;
+    private readonly ShushkaConfig _config;
 
-    public ThermalPrinterService(string printerName)
+    public ThermalPrinterService(ShushkaConfig config)
     {
-        _printerName = printerName;
+        _config = config;
     }
 
-    public bool IsConfigured => !string.IsNullOrWhiteSpace(_printerName);
+    public bool IsConfigured => !string.IsNullOrWhiteSpace(_config.ThermalPrinterName);
 
     /// <summary>
     /// Sends raw ESC/POS bytes to the configured thermal printer.
@@ -53,9 +56,10 @@ public sealed class ThermalPrinterService
     /// </summary>
     public bool PrintRaw(byte[] data)
     {
-        if (!IsConfigured) return false;
+        string printerName = _config.ThermalPrinterName;
+        if (string.IsNullOrWhiteSpace(printerName)) return false;
 
-        if (!OpenPrinter(_printerName, out var hPrinter, IntPtr.Zero))
+        if (!OpenPrinter(printerName, out var hPrinter, IntPtr.Zero))
             return false;
 
         try

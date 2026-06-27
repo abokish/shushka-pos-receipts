@@ -19,4 +19,10 @@ public sealed class ShushkaConfig
 
     // Thermal fallback printer — exact Windows printer name (e.g. "EPSON TM-T20III")
     public string ThermalPrinterName { get; set; } = "";
+
+    // Auto-send: when true and a customer phone is found, skip or countdown the popup
+    public bool AutoSendIfPhoneKnown { get; set; } = false;
+
+    // Seconds to count down before auto-sending. 0 = silent (no popup at all).
+    public int AutoSendCountdownSeconds { get; set; } = 3;
 }

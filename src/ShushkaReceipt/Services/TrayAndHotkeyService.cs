@@ -3,25 +3,32 @@ using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Microsoft.Extensions.Options;
 using ShushkaReceipt.Config;
+using ShushkaReceipt.Forms;
 
 namespace ShushkaReceipt.Services;
 
 /// <summary>
 /// Hosts the system tray icon on a dedicated STA thread.
 /// Green = listener active, Red = listener down or not yet started.
+/// Right-click menu: הגדרות (Settings) and יציאה (Exit).
 /// </summary>
 public sealed class TrayAndHotkeyService : BackgroundService
 {
-    private readonly AppState _appState;
+    private readonly AppState          _appState;
+    private readonly ShushkaConfig     _config;
+    private readonly AppSettingsWriter _settingsWriter;
     private readonly ILogger<TrayAndHotkeyService> _logger;
 
     public TrayAndHotkeyService(
         AppState appState,
-        IOptions<ShushkaConfig> _,   // kept for DI signature consistency
+        IOptions<ShushkaConfig> config,
+        AppSettingsWriter settingsWriter,
         ILogger<TrayAndHotkeyService> logger)
     {
-        _appState = appState;
-        _logger   = logger;
+        _appState       = appState;
+        _config         = config.Value;
+        _settingsWriter = settingsWriter;
+        _logger         = logger;
     }
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
@@ -31,7 +38,7 @@ public sealed class TrayAndHotkeyService : BackgroundService
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
-            using var form = new TrayForm(_appState);
+            using var form = new TrayForm(_appState, _config, _settingsWriter);
 
             using var reg = stoppingToken.Register(() =>
             {
@@ -40,7 +47,7 @@ public sealed class TrayAndHotkeyService : BackgroundService
                     if (form.IsHandleCreated)
                         form.BeginInvoke(Application.ExitThread);
                 }
-                catch { /* form may have been destroyed */ }
+                catch { }
             });
 
             Application.Run(form);
@@ -58,31 +65,59 @@ public sealed class TrayAndHotkeyService : BackgroundService
 
     private sealed class TrayForm : Form
     {
-        private readonly AppState _appState;
-        private readonly NotifyIcon _trayIcon;
+        private readonly AppState          _appState;
+        private readonly ShushkaConfig     _config;
+        private readonly AppSettingsWriter _settingsWriter;
+        private readonly NotifyIcon        _trayIcon;
 
-        internal TrayForm(AppState appState)
+        internal TrayForm(AppState appState, ShushkaConfig config, AppSettingsWriter settingsWriter)
         {
-            _appState = appState;
+            _appState       = appState;
+            _config         = config;
+            _settingsWriter = settingsWriter;
 
-            Text              = "ShushkaReceipt";
-            FormBorderStyle   = FormBorderStyle.FixedToolWindow;
-            ShowInTaskbar     = false;
-            WindowState       = FormWindowState.Minimized;
+            Text            = "ShushkaReceipt";
+            FormBorderStyle = FormBorderStyle.FixedToolWindow;
+            ShowInTaskbar   = false;
+            WindowState     = FormWindowState.Minimized;
             Width  = 1;
             Height = 1;
 
+            // ── Context menu ──────────────────────────────────────────────
+            var menu = new ContextMenuStrip();
+            menu.RightToLeft = RightToLeft.Yes;
+
+            var itemSettings = new ToolStripMenuItem("הגדרות...");
+            itemSettings.Click += (_, _) => OpenSettings();
+
+            var itemSep = new ToolStripSeparator();
+
+            var itemExit = new ToolStripMenuItem("יציאה");
+            itemExit.Click += (_, _) => Application.ExitThread();
+
+            menu.Items.AddRange([itemSettings, itemSep, itemExit]);
+
+            // ── Tray icon ─────────────────────────────────────────────────
             _trayIcon = new NotifyIcon
             {
-                Icon    = MakeCircleIcon(Color.Red),
-                Text    = "Shushka — ממתין...",
-                Visible = true,
+                Icon             = MakeCircleIcon(Color.Red),
+                Text             = "Shushka — ממתין...",
+                Visible          = true,
+                ContextMenuStrip = menu,
             };
+
+            // Double-click opens settings too
+            _trayIcon.DoubleClick += (_, _) => OpenSettings();
 
             appState.ListenerStatusChanged += OnListenerStatusChanged;
         }
 
-        [DllImport("user32.dll")] private static extern bool DestroyIcon(IntPtr hIcon);
+        private void OpenSettings()
+        {
+            // Run on the current STA thread — no new thread needed
+            using var form = new SettingsForm(_config, _settingsWriter);
+            form.ShowDialog(this);
+        }
 
         private void OnListenerStatusChanged(bool active)
         {
@@ -96,6 +131,8 @@ public sealed class TrayAndHotkeyService : BackgroundService
             });
         }
 
+        [DllImport("user32.dll")] private static extern bool DestroyIcon(IntPtr hIcon);
+
         private static Icon MakeCircleIcon(Color color)
         {
             using var bmp = new Bitmap(16, 16);
@@ -103,10 +140,6 @@ public sealed class TrayAndHotkeyService : BackgroundService
             g.Clear(Color.Transparent);
             using var brush = new SolidBrush(color);
             g.FillEllipse(brush, 1, 1, 14, 14);
-
-            // GetHicon creates a Win32 HICON that must be destroyed separately.
-            // Clone() copies it into a managed Icon that owns its own handle,
-            // then we destroy the raw HICON immediately.
             IntPtr hIcon = bmp.GetHicon();
             var icon = (Icon)Icon.FromHandle(hIcon).Clone();
             DestroyIcon(hIcon);

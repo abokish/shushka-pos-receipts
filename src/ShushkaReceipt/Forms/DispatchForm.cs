@@ -6,38 +6,46 @@ namespace ShushkaReceipt.Forms;
 
 /// <summary>
 /// Per-job dispatch popup. Appears above all windows for every incoming print job.
-/// Cashier chooses: send via WhatsApp, print to thermal, or skip.
 ///
 /// Keyboard:
-///   Enter — WhatsApp (AcceptButton; works from anywhere on the form, incl. phone field)
+///   Enter — WhatsApp (AcceptButton; works from anywhere, including the phone field)
 ///   Esc   — Skip     (CancelButton)
-///   F8    — Print    (only special key; greyed out if no thermal printer configured)
-///   F6    — WhatsApp (alias, kept for muscle memory)
+///   F8    — Print    (greyed out when no thermal printer configured)
+///   F6    — WhatsApp alias
+///
+/// Optional countdown: when countdownSeconds > 0 the form auto-dispatches to WhatsApp
+/// after the timer reaches zero unless the cashier interacts first.
 /// </summary>
 public sealed class DispatchForm : Form
 {
-    // ── Result the caller reads after the form closes ─────────────────────
     public enum Choice { WhatsApp, Print, Skip }
-    public Choice Result { get; private set; } = Choice.Skip;
+    public Choice Result   { get; private set; } = Choice.Skip;
     public string PhoneE164 { get; private set; } = "";
 
-    // ── Controls ──────────────────────────────────────────────────────────
     private readonly TextBox _phoneBox;
     private readonly Button  _btnWhatsApp;
     private readonly Button  _btnPrint;
     private readonly Button  _btnSkip;
+    private readonly string  _whatsAppMessage;
 
-    private readonly string _whatsAppMessage;
+    // Countdown
+    private System.Windows.Forms.Timer? _timer;
+    private int     _secondsLeft;
+    private Label?  _countdownLabel;
 
     public DispatchForm(
-        string receiptSummary,
-        string whatsAppMessage,
+        string  receiptSummary,
+        string  whatsAppMessage,
         string? prefilledPhoneE164,
-        bool thermalConfigured)
+        bool    thermalConfigured,
+        int?    countdownSeconds = null)
     {
         _whatsAppMessage = whatsAppMessage;
 
-        // ── Form setup ────────────────────────────────────────────────────
+        bool hasCountdown = countdownSeconds is > 0;
+        _secondsLeft = countdownSeconds ?? 0;
+
+        // ── Form ──────────────────────────────────────────────────────────
         Text              = "Shushka — שליחת קבלה";
         FormBorderStyle   = FormBorderStyle.FixedDialog;
         MaximizeBox       = false;
@@ -45,11 +53,11 @@ public sealed class DispatchForm : Form
         StartPosition     = FormStartPosition.CenterScreen;
         TopMost           = true;
         Width             = 420;
-        Height            = 210;
+        Height            = hasCountdown ? 240 : 210;
         RightToLeft       = RightToLeft.Yes;
         RightToLeftLayout = true;
 
-        // ── Summary label ─────────────────────────────────────────────────
+        // ── Summary ───────────────────────────────────────────────────────
         var summaryLabel = new Label
         {
             Text      = receiptSummary,
@@ -72,10 +80,10 @@ public sealed class DispatchForm : Form
 
         _phoneBox = new TextBox
         {
-            Width   = 240,
+            Width    = 240,
             Location = new Point(130, 67),
-            Font    = new Font("Segoe UI", 10f),
-            TabStop = true,
+            Font     = new Font("Segoe UI", 10f),
+            TabStop  = true,
         };
         _phoneBox.TextChanged += (_, _) => UpdateButtonState();
 
@@ -107,13 +115,13 @@ public sealed class DispatchForm : Form
 
         _btnPrint = new Button
         {
-            Text    = "הדפסה  F8",
-            Width   = 110,
-            Height  = 38,
+            Text     = "הדפסה  F8",
+            Width    = 110,
+            Height   = 38,
             Location = new Point(152, 115),
-            Font    = new Font("Segoe UI", 10f),
-            Enabled = thermalConfigured,
-            TabStop = thermalConfigured,
+            Font     = new Font("Segoe UI", 10f),
+            Enabled  = thermalConfigured,
+            TabStop  = thermalConfigured,
         };
         _btnPrint.Click += (_, _) => Dispatch(Choice.Print);
 
@@ -128,13 +136,9 @@ public sealed class DispatchForm : Form
         };
         _btnSkip.Click += (_, _) => Dispatch(Choice.Skip);
 
-        // ── Wire AcceptButton / CancelButton ──────────────────────────────
-        // Enter fires WhatsApp from anywhere (phone field, button focus, etc.)
-        // Esc fires Skip from anywhere — no KeyDown handler needed for either.
         AcceptButton = _btnWhatsApp;
         CancelButton = _btnSkip;
 
-        // ── F8 and F6 alias via KeyDown ───────────────────────────────────
         KeyPreview = true;
         KeyDown += (_, e) =>
         {
@@ -150,11 +154,28 @@ public sealed class DispatchForm : Form
             }
         };
 
+        // ── Countdown label ───────────────────────────────────────────────
+        if (hasCountdown)
+        {
+            _countdownLabel = new Label
+            {
+                Text      = CountdownText(),
+                AutoSize  = false,
+                Width     = 380,
+                Height    = 22,
+                Location  = new Point(12, 163),
+                ForeColor = Color.DarkOrange,
+                Font      = new Font("Segoe UI", 9f),
+                TextAlign = ContentAlignment.MiddleRight,
+            };
+        }
+
         // ── Assemble ──────────────────────────────────────────────────────
         Controls.AddRange([summaryLabel, phoneLabel, _phoneBox, phoneHint,
                            _btnWhatsApp, _btnPrint, _btnSkip]);
+        if (_countdownLabel is not null) Controls.Add(_countdownLabel);
 
-        // ── Initial state ─────────────────────────────────────────────────
+        // ── Initial focus ─────────────────────────────────────────────────
         if (prefilledPhoneE164 is not null)
         {
             _phoneBox.Text = PhoneInputHelper.FormatForDisplay(prefilledPhoneE164);
@@ -166,9 +187,35 @@ public sealed class DispatchForm : Form
         }
 
         UpdateButtonState();
+
+        // ── Start countdown after handle is created ───────────────────────
+        if (hasCountdown)
+        {
+            HandleCreated += (_, _) =>
+            {
+                _timer = new System.Windows.Forms.Timer { Interval = 1000 };
+                _timer.Tick += OnTick;
+                _timer.Start();
+            };
+        }
     }
 
-    // ── Phone validation ──────────────────────────────────────────────────
+    // ── Countdown ─────────────────────────────────────────────────────────
+
+    private void OnTick(object? sender, EventArgs e)
+    {
+        _secondsLeft--;
+        if (_countdownLabel is not null)
+            _countdownLabel.Text = CountdownText();
+
+        if (_secondsLeft <= 0)
+            Dispatch(Choice.WhatsApp);
+    }
+
+    private string CountdownText() =>
+        $"שולח אוטומטית ל-WhatsApp בעוד {_secondsLeft} שניות... (Esc לביטול)";
+
+    // ── State ──────────────────────────────────────────────────────────────
 
     private void UpdateButtonState()
     {
@@ -179,6 +226,8 @@ public sealed class DispatchForm : Form
 
     private void Dispatch(Choice choice)
     {
+        _timer?.Stop();
+
         if (choice == Choice.WhatsApp)
         {
             if (!PhoneInputHelper.TryParsePhone(_phoneBox.Text, out string e164)) return;
@@ -189,5 +238,11 @@ public sealed class DispatchForm : Form
 
         Result = choice;
         Close();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _timer?.Dispose();
+        base.Dispose(disposing);
     }
 }

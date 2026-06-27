@@ -103,22 +103,41 @@ public sealed class Worker : BackgroundService
 
         _fileLogger.Log($"JOB | bytes={rawBytes.Length} | phone={phone ?? "none"}");
 
-        // Show the dispatch form on the STA (tray) thread so it has a proper message pump.
-        // We pass rawBytes so the form can forward them to the thermal printer if chosen.
-        ShowDispatchForm(summary, message, phone, rawBytes);
+        // Auto-send mode: when phone is found and the setting is on
+        if (_config.AutoSendIfPhoneKnown && phone is not null)
+        {
+            int secs = _config.AutoSendCountdownSeconds;
+
+            if (secs == 0)
+            {
+                // Fully silent: open WhatsApp immediately, no popup
+                WhatsAppService.LaunchDeepLink(
+                    WhatsAppService.BuildWhatsAppLink(phone, message));
+                _fileLogger.Log($"AUTO_WHATSAPP | phone={phone}");
+                _logger.LogInformation("Auto-sent WhatsApp for {Phone}", phone);
+                return;
+            }
+
+            // Show popup with countdown timer
+            ShowDispatchForm(summary, message, phone, rawBytes, countdown: secs);
+            return;
+        }
+
+        ShowDispatchForm(summary, message, phone, rawBytes, countdown: null);
     }
 
     private void ShowDispatchForm(
-        string summary, string message, string? prefilledPhone, byte[] rawBytes)
+        string summary, string message, string? prefilledPhone, byte[] rawBytes,
+        int? countdown)
     {
-        // Run the form on a fresh STA thread — needed for Windows Forms.
         var thread = new Thread(() =>
         {
             using var form = new DispatchForm(
                 summary,
                 message,
                 prefilledPhone,
-                _thermal.IsConfigured);
+                _thermal.IsConfigured,
+                countdown);
 
             Application.Run(form);
 
