@@ -8,13 +8,11 @@ namespace ShushkaReceipt.Forms;
 
 public sealed class SettingsForm : Form
 {
-    private readonly ShushkaConfig    _config;
+    private readonly ShushkaConfig     _config;
     private readonly AppSettingsWriter _writer;
 
-    private readonly CheckBox       _chkAutoSend;
-    private readonly NumericUpDown  _numCountdown;
-    private readonly Label          _lblCountdownUnit;
-    private readonly ComboBox       _cmbPrinter;
+    private readonly CheckBox _chkAutoSend;
+    private readonly ComboBox _cmbPrinter;
 
     public SettingsForm(ShushkaConfig config, AppSettingsWriter writer)
     {
@@ -29,7 +27,7 @@ public sealed class SettingsForm : Form
         StartPosition     = FormStartPosition.CenterScreen;
         TopMost           = true;
         Width             = 440;
-        Height            = 260;
+        Height            = 210;
         RightToLeft       = RightToLeft.Yes;
         RightToLeftLayout = true;
         Font              = new Font("Segoe UI", 10f);
@@ -40,7 +38,7 @@ public sealed class SettingsForm : Form
             Text     = "שליחה אוטומטית",
             Location = new Point(10, 10),
             Width    = 400,
-            Height   = 100,
+            Height   = 65,
         };
 
         _chkAutoSend = new CheckBox
@@ -50,38 +48,14 @@ public sealed class SettingsForm : Form
             Location = new Point(10, 25),
             Checked  = config.AutoSendIfPhoneKnown,
         };
-        _chkAutoSend.CheckedChanged += (_, _) => UpdateCountdownEnabled();
 
-        var lblCountdown = new Label
-        {
-            Text     = "ספירה לאחור:",
-            AutoSize = true,
-            Location = new Point(10, 60),
-        };
-
-        _numCountdown = new NumericUpDown
-        {
-            Minimum  = 0,
-            Maximum  = 30,
-            Value    = Math.Clamp(config.AutoSendCountdownSeconds, 0, 30),
-            Width    = 60,
-            Location = new Point(120, 57),
-        };
-
-        _lblCountdownUnit = new Label
-        {
-            Text     = "שניות  (0 = שלח ללא הצגת חלון)",
-            AutoSize = true,
-            Location = new Point(190, 60),
-        };
-
-        grpAuto.Controls.AddRange([_chkAutoSend, lblCountdown, _numCountdown, _lblCountdownUnit]);
+        grpAuto.Controls.Add(_chkAutoSend);
 
         // ── Section: thermal printer ──────────────────────────────────────
         var grpPrinter = new GroupBox
         {
             Text     = "מדפסת תרמית (גיבוי)",
-            Location = new Point(10, 118),
+            Location = new Point(10, 83),
             Width    = 400,
             Height   = 65,
         };
@@ -109,7 +83,7 @@ public sealed class SettingsForm : Form
             Text      = "שמור",
             Width     = 90,
             Height    = 32,
-            Location  = new Point(10, 192),
+            Location  = new Point(10, 158),
             BackColor = Color.FromArgb(37, 211, 102),
             ForeColor = Color.White,
             FlatStyle = FlatStyle.Flat,
@@ -122,7 +96,7 @@ public sealed class SettingsForm : Form
             Text     = "ביטול",
             Width    = 90,
             Height   = 32,
-            Location = new Point(110, 192),
+            Location = new Point(110, 158),
         };
         btnCancel.Click += (_, _) => Close();
 
@@ -130,10 +104,7 @@ public sealed class SettingsForm : Form
         CancelButton = btnCancel;
 
         Controls.AddRange([grpAuto, grpPrinter, btnSave, btnCancel]);
-        UpdateCountdownEnabled();
     }
-
-    // ── Helpers ───────────────────────────────────────────────────────────
 
     private void PopulatePrinters(string currentName)
     {
@@ -143,19 +114,11 @@ public sealed class SettingsForm : Form
         foreach (string p in PrinterSettings.InstalledPrinters)
             _cmbPrinter.Items.Add(p);
 
-        // Select current value, or "(ללא)" if empty / not found
         if (!string.IsNullOrWhiteSpace(currentName) &&
             _cmbPrinter.Items.Contains(currentName))
             _cmbPrinter.SelectedItem = currentName;
         else
             _cmbPrinter.SelectedIndex = 0;
-    }
-
-    private void UpdateCountdownEnabled()
-    {
-        bool on = _chkAutoSend.Checked;
-        _numCountdown.Enabled    = on;
-        _lblCountdownUnit.Enabled = on;
     }
 
     private void OnSave(object? sender, EventArgs e)
@@ -165,9 +128,8 @@ public sealed class SettingsForm : Form
             : (_cmbPrinter.SelectedItem as string ?? "");
 
         _writer.Save(
-            autoSendIfPhoneKnown:     _chkAutoSend.Checked,
-            autoSendCountdownSeconds: (int)_numCountdown.Value,
-            thermalPrinterName:       printerName);
+            autoSendIfPhoneKnown: _chkAutoSend.Checked,
+            thermalPrinterName:   printerName);
 
         Close();
     }

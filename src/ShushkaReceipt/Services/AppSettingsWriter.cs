@@ -6,8 +6,7 @@ namespace ShushkaReceipt.Services;
 
 /// <summary>
 /// Writes updated values back to appsettings.json so settings survive restarts.
-/// Also updates the live ShushkaConfig singleton so changes take effect immediately
-/// without restarting the app.
+/// Also updates the live ShushkaConfig singleton so changes take effect immediately.
 /// </summary>
 public sealed class AppSettingsWriter
 {
@@ -23,28 +22,16 @@ public sealed class AppSettingsWriter
         _config = config;
     }
 
-    public void Save(
-        bool   autoSendIfPhoneKnown,
-        int    autoSendCountdownSeconds,
-        string thermalPrinterName)
+    public void Save(bool autoSendIfPhoneKnown, string thermalPrinterName)
     {
-        // Update the live config immediately (takes effect for the next job)
-        _config.AutoSendIfPhoneKnown      = autoSendIfPhoneKnown;
-        _config.AutoSendCountdownSeconds  = autoSendCountdownSeconds;
-        _config.ThermalPrinterName        = thermalPrinterName;
+        _config.AutoSendIfPhoneKnown = autoSendIfPhoneKnown;
+        _config.ThermalPrinterName   = thermalPrinterName;
 
-        // Persist to disk
         lock (_lock)
         {
             JsonObject root;
-            try
-            {
-                root = JsonNode.Parse(File.ReadAllText(_path))!.AsObject();
-            }
-            catch
-            {
-                root = new JsonObject();
-            }
+            try   { root = JsonNode.Parse(File.ReadAllText(_path))!.AsObject(); }
+            catch { root = new JsonObject(); }
 
             if (root["Shushka"] is not JsonObject shushka)
             {
@@ -52,9 +39,8 @@ public sealed class AppSettingsWriter
                 root["Shushka"] = shushka;
             }
 
-            shushka["AutoSendIfPhoneKnown"]     = autoSendIfPhoneKnown;
-            shushka["AutoSendCountdownSeconds"]  = autoSendCountdownSeconds;
-            shushka["ThermalPrinterName"]        = thermalPrinterName;
+            shushka["AutoSendIfPhoneKnown"] = autoSendIfPhoneKnown;
+            shushka["ThermalPrinterName"]   = thermalPrinterName;
 
             File.WriteAllText(_path, root.ToJsonString(JsonOptions));
         }

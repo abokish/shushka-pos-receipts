@@ -103,32 +103,21 @@ public sealed class Worker : BackgroundService
 
         _fileLogger.Log($"JOB | bytes={rawBytes.Length} | phone={phone ?? "none"}");
 
-        // Auto-send mode: when phone is found and the setting is on
+        // Auto-send: phone known + setting on → open WhatsApp silently, no popup
         if (_config.AutoSendIfPhoneKnown && phone is not null)
         {
-            int secs = _config.AutoSendCountdownSeconds;
-
-            if (secs == 0)
-            {
-                // Fully silent: open WhatsApp immediately, no popup
-                WhatsAppService.LaunchDeepLink(
-                    WhatsAppService.BuildWhatsAppLink(phone, message));
-                _fileLogger.Log($"AUTO_WHATSAPP | phone={phone}");
-                _logger.LogInformation("Auto-sent WhatsApp for {Phone}", phone);
-                return;
-            }
-
-            // Show popup with countdown timer
-            ShowDispatchForm(summary, message, phone, rawBytes, countdown: secs);
+            WhatsAppService.LaunchDeepLink(
+                WhatsAppService.BuildWhatsAppLink(phone, message));
+            _fileLogger.Log($"AUTO_WHATSAPP | phone={phone}");
+            _logger.LogInformation("Auto-sent WhatsApp for {Phone}", phone);
             return;
         }
 
-        ShowDispatchForm(summary, message, phone, rawBytes, countdown: null);
+        ShowDispatchForm(summary, message, phone, rawBytes);
     }
 
     private void ShowDispatchForm(
-        string summary, string message, string? prefilledPhone, byte[] rawBytes,
-        int? countdown)
+        string summary, string message, string? prefilledPhone, byte[] rawBytes)
     {
         var thread = new Thread(() =>
         {
@@ -136,8 +125,7 @@ public sealed class Worker : BackgroundService
                 summary,
                 message,
                 prefilledPhone,
-                _thermal.IsConfigured,
-                countdown);
+                _thermal.IsConfigured);
 
             Application.Run(form);
 
