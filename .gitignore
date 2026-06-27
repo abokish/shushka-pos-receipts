@@ -1,0 +1,27 @@
+# Claude Code local settings
+.claude/
+
+# Build output
+bin/
+obj/
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.user
+*.suo
+
+# dotnet publish output (created by install-service.ps1)
+C:/ShushkaReceipt/
+
+# Log files — never commit logs or backups
+*.log
+*.log.old
+
+# Local settings overrides (never commit — may contain printer names, paths)
+appsettings.Local.json
+appsettings.Development.json
+
+# OS
+Thumbs.db
+.DS_Store
