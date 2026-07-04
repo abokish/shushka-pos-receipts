@@ -12,6 +12,7 @@ public class PhoneInputHelperTests
     [InlineData("054-6995623",  "972546995623")]
     [InlineData("050-1234567",  "972501234567")]
     [InlineData("058-1234567",  "972581234567")]
+    [InlineData("543090412",    "972543090412")] // real receipt: 9 digits, no leading zero
     public void ValidPhone_ReturnsE164(string input, string expected)
     {
         bool ok = PhoneInputHelper.TryParsePhone(input, out string e164);

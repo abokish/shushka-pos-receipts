@@ -4,10 +4,8 @@ using ShushkaReceipt.Services;
 namespace ShushkaReceipt.Tests;
 
 /// <summary>
-/// Sanity check: verifies the PARSER handles the three document types the store uses.
-/// Input is already-decoded text (as it would appear after DecodeReceipt), so these
-/// tests focus on ReceiptParser.BuildMessage rather than the decoder.
-/// The decoder is exercised end-to-end in DecodeReceiptTests and TcpLoopbackTests.
+/// Verifies the parser handles the document types the store uses.
+/// Input is already-decoded text (as it would appear after DecodeReceipt).
 /// </summary>
 public class DocumentTypeCoverageTests
 {
@@ -39,7 +37,7 @@ public class DocumentTypeCoverageTests
         Assert.Contains("₪42.00",     message);
     }
 
-    // ── Type 2: חשבונית עסקה (tax invoice) ───────────────────────────────
+    // ── Type 2: חשבונית עסקה (tax invoice) — synthetic ───────────────────
 
     private const string TaxInvoiceDecoded = """
         טבע בוקיש
@@ -51,10 +49,84 @@ public class DocumentTypeCoverageTests
     [Fact]
     public void TaxInvoice_ParsesItems()
     {
-        // Tax invoice has no order number, but items and total are still parsed
         string message = ReceiptParser.BuildMessage(TaxInvoiceDecoded, Config);
         Assert.Contains("₪30.00",             message);
         Assert.Contains(Config.MessageClosing, message);
+    }
+
+    // ── Type 2b: Real חשבונית עסקה layout ────────────────────────────────
+    // Mirrors the actual receipt photo: column header, weight sub-line,
+    // no-leading-zero phone, and sections below לתשלום that must be excluded.
+
+    private const string TaxInvoiceRealLayout = """
+        טבע בוקיש
+        חשבונית עסקה 01/020550
+        לקוח: ענת וצביקה בן חיים
+        מספר לקוח: 29
+        טלפון: 543090412
+        קוד תיאור סכום
+        22564 כרוב 20.83
+        2.340 ק"ג X 8.90 ש"ח\ק"ג
+        8850161161513 מי קוקוס קוקומקס ליטר ב 24.00
+        לתשלום 44.83
+        אשראי לקוהרון 44.83
+        פירוט חיוב אשראי לקוח:
+        חוב קודם: 25.00
+        סה"כ חיוב בחשבון זה: 44.83
+        חוב לאחר חשבון זה: 69.83
+        סכום חייב במע"מ 0%: 20.83
+        סכום חייב במע"מ 18% *: 20.34
+        """;
+
+    [Fact]
+    public void TaxInvoice_RealLayout_ParsesItems()
+    {
+        string message = ReceiptParser.BuildMessage(TaxInvoiceRealLayout, Config);
+        Assert.Contains("כרוב",   message);
+        Assert.Contains("₪20.83", message);
+        Assert.Contains("קוקוס",  message);
+        Assert.Contains("₪24.00", message);
+    }
+
+    [Fact]
+    public void TaxInvoice_RealLayout_Total()
+    {
+        string message = ReceiptParser.BuildMessage(TaxInvoiceRealLayout, Config);
+        Assert.Contains("₪44.83", message);
+    }
+
+    [Fact]
+    public void TaxInvoice_RealLayout_InvoiceNumber()
+    {
+        string message = ReceiptParser.BuildMessage(TaxInvoiceRealLayout, Config);
+        Assert.Contains("חשבונית עסקה 01/020550", message);
+    }
+
+    [Fact]
+    public void TaxInvoice_RealLayout_SkipsWeightSubLine()
+    {
+        // "2.340 ק\"ג X 8.90 ש\"ח\ק\"ג" must not appear as a separate item
+        string message = ReceiptParser.BuildMessage(TaxInvoiceRealLayout, Config);
+        Assert.DoesNotContain("2.340", message);
+        Assert.DoesNotContain("₪8.90", message);
+    }
+
+    [Fact]
+    public void TaxInvoice_RealLayout_ExcludesDebtSection()
+    {
+        // Account/debt/VAT detail lines appear after לתשלום — must not be in message
+        string message = ReceiptParser.BuildMessage(TaxInvoiceRealLayout, Config);
+        Assert.DoesNotContain("חוב קודם",   message);
+        Assert.DoesNotContain("חוב לאחר",   message);
+        Assert.DoesNotContain("מע\"מ 0%",   message);
+        Assert.DoesNotContain("מע\"מ 18%",  message);
+    }
+
+    [Fact]
+    public void TaxInvoice_RealLayout_PhoneExtraction()
+    {
+        string? phone = ReceiptParser.ExtractCustomerPhone(TaxInvoiceRealLayout, Config);
+        Assert.Equal("972543090412", phone);
     }
 
     // ── Type 3: Refund / זיכוי ────────────────────────────────────────────
@@ -85,8 +157,6 @@ public class DocumentTypeCoverageTests
     [Fact]
     public void ShortItemCode_DeliveryLine_AppearInMessage()
     {
-        // Short code "9" (1 digit) glues to description — known edge case.
-        // The item IS still parsed (price found), so delivery appears in the output.
         string message = ReceiptParser.BuildMessage(DeliveryItemDecoded, Config);
         Assert.Contains("₪10.00", message);
         Assert.Contains("משלוח",  message);
@@ -95,9 +165,8 @@ public class DocumentTypeCoverageTests
     [Fact]
     public void ShortItemCode_IsNotStripped()
     {
-        // Only 3-6 digit codes are stripped; 1-digit code "9" stays glued to description
+        // Only 3+ digit codes are stripped; 1-digit code "9" stays glued to description
         string message = ReceiptParser.BuildMessage(DeliveryItemDecoded, Config);
-        // "9משלוח" (with code) rather than just "משלוח" (without) — code is present
         Assert.Contains("9משלוח", message);
     }
 }

@@ -15,7 +15,7 @@ public class ExtractCustomerPhoneTests
         תאריך 24/06/26
         """;
 
-    // Receipt with a customer block that contains a phone
+    // Receipt with a customer block that contains a phone (with leading zero and dash)
     private const string WithCustomerPhone = """
         טבע בוקיש
         טל: 054-6995623
@@ -33,6 +33,17 @@ public class ExtractCustomerPhoneTests
         מספר לקוח 42
         שם: ישראל ישראלי
         טלפון:
+        """;
+
+    // Real חשבונית עסקה layout: phone without leading zero (as seen in captured receipt)
+    private const string InvoiceWithNoLeadingZeroPhone = """
+        טבע בוקיש
+        חשבונית עסקה 01/020550
+        לקוח: ענת וצביקה בן חיים
+        מספר לקוח: 29
+        יתרה: 25.00
+        טלפון: 543090412
+        כתובת:
         """;
 
     [Fact]
@@ -54,7 +65,6 @@ public class ExtractCustomerPhoneTests
     public void CustomerBlockPhone_ConvertedToE164()
     {
         string? phone = ReceiptParser.ExtractCustomerPhone(WithCustomerPhone, DefaultConfig);
-        // 052-1234567 → 9725 21234567 → "972521234567"
         Assert.Equal("972521234567", phone);
     }
 
@@ -89,5 +99,21 @@ public class ExtractCustomerPhoneTests
             """;
         string? phone = ReceiptParser.ExtractCustomerPhone(decoded, DefaultConfig);
         Assert.Equal("972521234567", phone);
+    }
+
+    // Real-world case: customer phone stored without leading zero (9 digits, starts with 5)
+    [Fact]
+    public void CustomerPhone_NoLeadingZero_Normalised()
+    {
+        string? phone = ReceiptParser.ExtractCustomerPhone(InvoiceWithNoLeadingZeroPhone, DefaultConfig);
+        Assert.Equal("972543090412", phone);
+    }
+
+    [Fact]
+    public void CustomerPhone_NoLeadingZero_NotNull()
+    {
+        // Regression: the old regex "0\d{1,2}-?\d{7}" would not match "543090412"
+        string? phone = ReceiptParser.ExtractCustomerPhone(InvoiceWithNoLeadingZeroPhone, DefaultConfig);
+        Assert.NotNull(phone);
     }
 }

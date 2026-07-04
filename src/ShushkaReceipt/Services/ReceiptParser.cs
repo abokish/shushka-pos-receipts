@@ -6,9 +6,6 @@ namespace ShushkaReceipt.Services;
 
 public static class ReceiptParser
 {
-    // PLACEHOLDER — to be finalized after a real receipt-with-phone is captured.
-    // Must anchor on the customer-block טלפון: label (after מספר לקוח),
-    // NOT the store header phone (054-6995623).
     public static string? ExtractCustomerPhone(string decoded, ShushkaConfig config)
     {
         var lines = decoded.Split('\n');
@@ -27,18 +24,35 @@ public static class ReceiptParser
 
         for (int i = customerBlockStart; i < lines.Length; i++)
         {
-            if (!lines[i].Contains(config.CustomerPhoneLabel)) continue;
+            int labelIdx = lines[i].IndexOf(config.CustomerPhoneLabel, StringComparison.Ordinal);
+            if (labelIdx < 0) continue;
 
-            var m = Regex.Match(lines[i], config.PhoneRegex);
-            if (m.Success) return ToE164(m.Value);
+            // Take everything after the label (e.g. "543090412" or "052-1234567" or "")
+            string afterLabel = lines[i][(labelIdx + config.CustomerPhoneLabel.Length)..].Trim();
+            if (string.IsNullOrEmpty(afterLabel)) return null;
+
+            return ToE164(afterLabel);
         }
 
         return null;
     }
 
-    private static string ToE164(string phone)
+    // Normalises any Israeli phone representation to E.164 (972XXXXXXXXX).
+    // Handles: leading 0 (052-1234567), no leading 0 (543090412), or 972-prefixed.
+    // Returns null when the result fails the Israeli mobile sanity check (9-digit NSN starting with 5).
+    private static string? ToE164(string raw)
     {
-        string digits = phone.TrimStart('0').Replace("-", "");
+        string digits = Regex.Replace(raw, @"\D", "");
+
+        if (digits.StartsWith("972"))
+            digits = digits[3..];
+        else if (digits.StartsWith("0"))
+            digits = digits[1..];
+
+        // Israeli mobile NSN: 9 digits, starts with 5
+        if (digits.Length != 9 || !digits.StartsWith('5'))
+            return null;
+
         return "972" + digits;
     }
 
@@ -50,23 +64,25 @@ public static class ReceiptParser
             .ToArray();
 
         string storeName = lines.Length > 0 ? lines[0] : "";
-        string orderNum  = ExtractGroup(lines, @"מספר הזמנה\s+(\d+)", 1) ?? "";
-        string date      = ExtractGroup(lines, @"תאריך\s+([\d/]+)", 1) ?? "";
-        string time      = ExtractGroup(lines, @"שעה\s*([\d:]+)", 1) ?? "";
 
-        var items = lines
-            .Select(TryParseItemLine)
-            .Where(x => x.HasValue)
-            .Select(x => x!.Value)
-            .ToList();
+        // Support order (מספר הזמנה) and transaction invoice (חשבונית עסקה)
+        string? orderNum   = ExtractGroup(lines, @"מספר הזמנה\s+(\d+)", 1);
+        string? invoiceNum = ExtractGroup(lines, @"חשבונית עסקה\s+([\d/]+)", 1);
 
+        // תאריך and שעה may have a colon separator on some document types
+        string date  = ExtractGroup(lines, @"תאריך[:\s]+([\d/]+)",  1) ?? "";
+        string time  = ExtractGroup(lines, @"שעה[:\s]*([\d:]+)",    1) ?? "";
         string total = ExtractGroup(lines, @"לתשלום\s+(\d+\.\d{2})", 1) ?? "";
+
+        var items = ExtractItems(lines);
 
         var sb = new StringBuilder();
         sb.AppendLine(storeName);
 
-        if (!string.IsNullOrEmpty(orderNum))
+        if (orderNum is not null)
             sb.AppendLine($"הזמנה {orderNum}");
+        else if (invoiceNum is not null)
+            sb.AppendLine($"חשבונית עסקה {invoiceNum}");
 
         string dateTime = $"{date}  {time}".Trim();
         if (!string.IsNullOrEmpty(dateTime))
@@ -87,6 +103,55 @@ public static class ReceiptParser
         return sb.ToString();
     }
 
+    // Extracts items between the column-header line (containing "קוד") and the
+    // לתשלום line.  Falls back to scanning all lines when no header is present
+    // (e.g. synthetic test data or order receipts without an explicit header).
+    private static List<(string desc, string price)> ExtractItems(string[] lines)
+    {
+        int headerIdx = -1;
+        for (int i = 0; i < lines.Length; i++)
+        {
+            // Column header contains the code column label
+            if (lines[i].Contains("קוד") && (lines[i].Contains("סכום") || lines[i].Contains("תיאור")))
+            {
+                headerIdx = i;
+                break;
+            }
+        }
+
+        int totalIdx = -1;
+        for (int i = 0; i < lines.Length; i++)
+        {
+            if (Regex.IsMatch(lines[i], @"לתשלום"))
+            {
+                totalIdx = i;
+                break;
+            }
+        }
+
+        var items = new List<(string, string)>();
+
+        if (headerIdx >= 0 && totalIdx > headerIdx)
+        {
+            for (int i = headerIdx + 1; i < totalIdx; i++)
+            {
+                var item = TryParseItemLine(lines[i]);
+                if (item.HasValue) items.Add(item.Value);
+            }
+        }
+        else
+        {
+            // Fallback: scan all lines (no column header found)
+            foreach (var line in lines)
+            {
+                var item = TryParseItemLine(line);
+                if (item.HasValue) items.Add(item.Value);
+            }
+        }
+
+        return items;
+    }
+
     private static string? ExtractGroup(string[] lines, string pattern, int group)
     {
         foreach (var line in lines)
@@ -97,17 +162,36 @@ public static class ReceiptParser
         return null;
     }
 
+    // Parses a single item line into (description, price).
+    //
+    // Item lines start with a numeric code (e.g. "22564 כרוב 20.83" or "001תות שדה 42.00*").
+    // Weight/unit sub-lines start with a decimal (e.g. "2.340 ק\"ג X 8.90") and are rejected.
+    // The asterisk (*) is a VAT marker — it may appear before or after the price; strip it.
+    // Short codes (1-2 digits) glue to the description and are not stripped (known edge case).
     private static (string desc, string price)? TryParseItemLine(string line)
     {
-        var priceMatch = Regex.Match(line, @"(\d+\.\d{2})\s*\*");
-        if (!priceMatch.Success) return null;
+        string trimmed = line.TrimStart();
 
-        string price = priceMatch.Groups[1].Value;
-        string rest  = line[..priceMatch.Index].Trim();
+        // Must start with digit(s) followed by a non-digit, non-dot character.
+        // Rejects weight sub-lines like "2.340 ק\"ג X 8.90" (digit then dot).
+        if (!Regex.IsMatch(trimmed, @"^\d+[^\d.]")) return null;
 
-        // Strip leading item code (3–6 digits). Short codes (1–2 digits) glue to the
-        // description — edge case tracked in the open items, to fix per document type.
-        rest = Regex.Replace(rest, @"^\d{3,6}\s*", "").Trim();
+        // The item price is the last dd.dd pattern on the line
+        var priceMatches = Regex.Matches(trimmed, @"\d+\.\d{2}");
+        if (priceMatches.Count == 0) return null;
+
+        var lastPrice = priceMatches[^1];
+        string price = lastPrice.Value;
+
+        // Everything before the price; trim trailing VAT marker and spaces
+        string beforePrice = trimmed[..lastPrice.Index].TrimEnd('*', ' ');
+
+        // Strip leading item code (3+ digits then optional space).
+        // Short codes (1-2 digits) are not stripped — they glue to the description.
+        string rest = Regex.Replace(beforePrice.TrimStart(), @"^\d{3,}\s*", "").Trim();
+
+        // Remove any remaining VAT markers embedded in the description
+        rest = rest.Replace("*", "").Trim();
 
         if (string.IsNullOrEmpty(rest)) return null;
 
