@@ -15,7 +15,8 @@ namespace ShushkaReceipt.Forms;
 ///     phone input + [שלח ללקוח | שלח לחנות | שמור מקומית | הדפסה | דלג]
 ///
 ///   Internal — Z report, cashier login, etc.:
-///     no phone input + [שלח לבעלים | שלח לחנות | שלח למספר... | שמור מקומית | דלג]
+///     scrollable text view of the print content +
+///     [שלח לבעלים | שלח לחנות | שלח למספר... | שמור מקומית | סגור]
 ///
 /// The form handles on-demand store/owner phone entry internally: if a routing button
 /// is clicked and the target phone is not yet configured, a PhonePromptDialog is shown
@@ -27,30 +28,30 @@ public sealed class DispatchForm : Form
 
     public enum Choice
     {
-        ToCustomer,   // WhatsApp to the phone entered in the phone box
-        ToStore,      // WhatsApp to StorePhone
-        ToOwner,      // WhatsApp to OwnerPhone
-        ToNumber,     // WhatsApp to a one-time number (Internal "שלח למספר...")
+        ToCustomer,
+        ToStore,
+        ToOwner,
+        ToNumber,
         SaveLocally,
         Print,
         Skip
     }
 
-    public Choice  Result    { get; private set; } = Choice.Skip;
-    public string  PhoneE164 { get; private set; } = "";
+    public Choice Result    { get; private set; } = Choice.Skip;
+    public string PhoneE164 { get; private set; } = "";
 
-    private readonly string           _message;
-    private readonly ShushkaConfig    _config;
+    private readonly string            _message;
+    private readonly ShushkaConfig     _config;
     private readonly AppSettingsWriter _writer;
-    private readonly TextBox?         _phoneBox;
+    private readonly TextBox?          _phoneBox;
 
     public DispatchForm(
-        DispatchMode    mode,
-        string          summary,
-        string          message,
-        string?         prefilledPhoneE164,
-        bool            thermalConfigured,
-        ShushkaConfig   config,
+        DispatchMode      mode,
+        string            summary,
+        string            message,
+        string?           prefilledPhoneE164,
+        bool              thermalConfigured,
+        ShushkaConfig     config,
         AppSettingsWriter writer)
     {
         _message = message;
@@ -64,7 +65,7 @@ public sealed class DispatchForm : Form
         MinimizeBox       = false;
         StartPosition     = FormStartPosition.CenterScreen;
         TopMost           = true;
-        Width             = 460;
+        Width             = 480;
         RightToLeft       = RightToLeft.Yes;
         RightToLeftLayout = true;
         Font              = new Font("Segoe UI", 10f);
@@ -74,18 +75,37 @@ public sealed class DispatchForm : Form
         {
             Text      = summary,
             AutoSize  = false,
-            Width     = 420,
-            Height    = 44,
+            Width     = 440,
+            Height    = 40,
             Location  = new Point(12, 12),
             Font      = new Font("Segoe UI", 11f, FontStyle.Bold),
             TextAlign = ContentAlignment.MiddleRight,
         };
 
-        int nextY = 64;
+        int nextY = 58;
 
-        // ── Phone row (not shown for Internal mode) ───────────────────────
-        if (mode != DispatchMode.Internal)
+        if (mode == DispatchMode.Internal)
         {
+            // ── Scrollable content view ───────────────────────────────────
+            var contentBox = new TextBox
+            {
+                Multiline    = true,
+                ReadOnly     = true,
+                ScrollBars   = ScrollBars.Vertical,
+                Width        = 440,
+                Height       = 220,
+                Location     = new Point(12, nextY),
+                Font         = new Font("Courier New", 9f),
+                BackColor    = System.Drawing.SystemColors.Window,
+                Text         = message,
+                RightToLeft  = RightToLeft.Yes,
+            };
+            Controls.Add(contentBox);
+            nextY += 228;
+        }
+        else
+        {
+            // ── Phone row ─────────────────────────────────────────────────
             var phoneLabel = new Label
             {
                 Text     = "טלפון:",
@@ -95,8 +115,8 @@ public sealed class DispatchForm : Form
 
             _phoneBox = new TextBox
             {
-                Width    = 230,
-                Location = new Point(165, nextY),
+                Width    = 240,
+                Location = new Point(180, nextY),
                 TabStop  = true,
             };
             _phoneBox.TextChanged += (_, _) => UpdateCustomerButton();
@@ -107,7 +127,7 @@ public sealed class DispatchForm : Form
                 AutoSize  = true,
                 ForeColor = Color.Gray,
                 Font      = new Font("Segoe UI", 8f),
-                Location  = new Point(165, nextY + 24),
+                Location  = new Point(180, nextY + 24),
                 Visible   = prefilledPhoneE164 is null,
             };
 
@@ -115,26 +135,23 @@ public sealed class DispatchForm : Form
                 _phoneBox.Text = PhoneInputHelper.FormatForDisplay(prefilledPhoneE164);
 
             Controls.AddRange([phoneLabel, _phoneBox, phoneHint]);
-            nextY += 50;
+            nextY += 52;
         }
 
-        nextY += 8;
+        nextY += 6;
 
-        // ── Buttons — row 1 ───────────────────────────────────────────────
-        var row1Btns = BuildRow1Buttons(mode, thermalConfigured, nextY);
+        // ── Buttons ───────────────────────────────────────────────────────
+        var row1 = BuildRow(MakeRow1(mode, thermalConfigured, nextY));
+        nextY += 44;
+        var row2 = BuildRow(MakeRow2(mode, thermalConfigured, nextY));
         nextY += 44;
 
-        // ── Buttons — row 2 ───────────────────────────────────────────────
-        var row2Btns = BuildRow2Buttons(mode, thermalConfigured, nextY);
-        nextY += 44;
-
-        Height = nextY + 20;
+        Height = nextY + 16;
 
         Controls.Add(summaryLabel);
-        foreach (var b in row1Btns) Controls.Add(b);
-        foreach (var b in row2Btns) Controls.Add(b);
+        foreach (var b in row1) Controls.Add(b);
+        foreach (var b in row2) Controls.Add(b);
 
-        // Keyboard shortcuts
         KeyPreview = true;
         KeyDown += (_, e) =>
         {
@@ -145,75 +162,35 @@ public sealed class DispatchForm : Form
             }
         };
 
-        // Focus
-        if (mode == DispatchMode.Internal)
-        {
-            // No phone box — nothing to focus; first button gets tab focus
-        }
-        else if (prefilledPhoneE164 is not null)
-        {
-            UpdateCustomerButton();
-            // focus is set after controls are added; handled below
-        }
-        else
-        {
+        if (mode != DispatchMode.Internal && prefilledPhoneE164 is null)
             ActiveControl = _phoneBox;
-        }
     }
 
-    // ── Button factory helpers ─────────────────────────────────────────────
+    // ── Button rows ───────────────────────────────────────────────────────
 
-    private Button[] BuildRow1Buttons(DispatchMode mode, bool thermalConfigured, int y)
+    private Button[] MakeRow1(DispatchMode mode, bool thermal, int y) => mode switch
     {
-        return mode switch
-        {
-            DispatchMode.CustomerNoPhone => BuildRow([
-                MakeCustomerBtn(y),
-                MakeSaveBtn(y),
-                MakePrintBtn(y, thermalConfigured),
-            ]),
-            DispatchMode.Order => BuildRow([
-                MakeCustomerBtn(y),
-                MakeStoreBtn(y),
-                MakeSaveBtn(y),
-            ]),
-            DispatchMode.Internal => BuildRow([
-                MakeOwnerBtn(y),
-                MakeStoreBtn(y),
-                MakeToNumberBtn(y),
-            ]),
-            _ => []
-        };
-    }
+        DispatchMode.CustomerNoPhone => [MakeCustomerBtn(y), MakeSaveBtn(y), MakePrintBtn(y, thermal)],
+        DispatchMode.Order           => [MakeCustomerBtn(y), MakeStoreBtn(y), MakeSaveBtn(y)],
+        DispatchMode.Internal        => [MakeOwnerBtn(y), MakeStoreBtn(y), MakeToNumberBtn(y)],
+        _                            => [],
+    };
 
-    private Button[] BuildRow2Buttons(DispatchMode mode, bool thermalConfigured, int y)
+    private Button[] MakeRow2(DispatchMode mode, bool thermal, int y) => mode switch
     {
-        return mode switch
-        {
-            DispatchMode.CustomerNoPhone => BuildRow([
-                MakeSkipBtn(y),
-            ]),
-            DispatchMode.Order => BuildRow([
-                MakePrintBtn(y, thermalConfigured),
-                MakeSkipBtn(y),
-            ]),
-            DispatchMode.Internal => BuildRow([
-                MakeSaveBtn(y),
-                MakePrintBtn(y, thermalConfigured),
-                MakeSkipBtn(y),
-            ]),
-            _ => []
-        };
-    }
+        DispatchMode.CustomerNoPhone => [MakeSkipBtn(y, "דלג  Esc")],
+        DispatchMode.Order           => [MakePrintBtn(y, thermal), MakeSkipBtn(y, "דלג  Esc")],
+        DispatchMode.Internal        => [MakeSaveBtn(y), MakePrintBtn(y, thermal), MakeSkipBtn(y, "סגור  Esc")],
+        _                            => [],
+    };
 
-    // Lays out buttons evenly across the form width (420 usable px, 12 left margin).
+    // Distributes buttons evenly across the 440 usable px.
     private static Button[] BuildRow(Button[] btns)
     {
         if (btns.Length == 0) return btns;
-        int total   = 420;
-        int gap     = 8;
-        int width   = (total - gap * (btns.Length - 1)) / btns.Length;
-        int x       = 12;
+        int gap   = 8;
+        int width = (440 - gap * (btns.Length - 1)) / btns.Length;
+        int x     = 12;
         foreach (var b in btns)
         {
             b.Width    = width;
@@ -223,104 +200,81 @@ public sealed class DispatchForm : Form
         return btns;
     }
 
+    // ── Button factories ──────────────────────────────────────────────────
+
     private Button MakeCustomerBtn(int y)
     {
-        var b = new Button
-        {
-            Text      = "שלח ללקוח",
-            Height    = 38,
-            Location  = new Point(0, y),
-            BackColor = Color.FromArgb(37, 211, 102),
-            ForeColor = Color.White,
-            FlatStyle = FlatStyle.Flat,
-            TabStop   = true,
-            Enabled   = false,
-        };
-        b.FlatAppearance.BorderSize = 0;
-        b.Click += (_, _) => DispatchToCustomer();
+        var b = MakeBtn("שלח ללקוח", y, Color.FromArgb(37, 211, 102), Color.White);
+        b.Enabled = false;
+        b.Click  += (_, _) => DispatchToCustomer();
         AcceptButton = b;
         return b;
     }
 
     private Button MakeStoreBtn(int y)
     {
-        bool configured = !string.IsNullOrEmpty(_config.StorePhone);
-        var b = new Button
-        {
-            Text     = configured ? "שלח לחנות ✓" : "שלח לחנות...",
-            Height   = 38,
-            Location = new Point(0, y),
-            TabStop  = true,
-        };
+        bool cfg = !string.IsNullOrEmpty(_config.StorePhone);
+        var b    = MakeBtn(cfg ? "שלח לחנות ✓" : "שלח לחנות...", y);
         b.Click += (_, _) => DispatchToStore(b);
         return b;
     }
 
     private Button MakeOwnerBtn(int y)
     {
-        bool configured = !string.IsNullOrEmpty(_config.OwnerPhone);
-        var b = new Button
-        {
-            Text     = configured ? "שלח לבעלים ✓" : "שלח לבעלים...",
-            Height   = 38,
-            Location = new Point(0, y),
-            TabStop  = true,
-        };
+        bool cfg = !string.IsNullOrEmpty(_config.OwnerPhone);
+        var b    = MakeBtn(cfg ? "שלח לבעלים ✓" : "שלח לבעלים...", y);
         b.Click += (_, _) => DispatchToOwner(b);
         return b;
     }
 
     private Button MakeToNumberBtn(int y)
     {
-        var b = new Button
-        {
-            Text    = "שלח למספר...",
-            Height  = 38,
-            Location = new Point(0, y),
-            TabStop  = true,
-        };
+        var b = MakeBtn("שלח למספר...", y);
         b.Click += (_, _) => DispatchToCustomNumber();
         return b;
     }
 
     private Button MakeSaveBtn(int y)
     {
-        var b = new Button
-        {
-            Text    = "שמור מקומית",
-            Height  = 38,
-            Location = new Point(0, y),
-            TabStop  = true,
-        };
+        var b = MakeBtn("שמור מקומית", y);
         b.Click += (_, _) => Dispatch(Choice.SaveLocally);
         return b;
     }
 
     private Button MakePrintBtn(int y, bool enabled)
     {
-        var b = new Button
-        {
-            Text    = "הדפסה  F8",
-            Height  = 38,
-            Location = new Point(0, y),
-            Enabled = enabled,
-            TabStop = enabled,
-        };
-        b.Click += (_, _) => Dispatch(Choice.Print);
+        var b = MakeBtn("הדפסה  F8", y);
+        b.Enabled = enabled;
+        b.TabStop = enabled;
+        b.Click  += (_, _) => Dispatch(Choice.Print);
         return b;
     }
 
-    private Button MakeSkipBtn(int y)
+    private Button MakeSkipBtn(int y, string label)
+    {
+        var b = MakeBtn(label, y);
+        b.Click += (_, _) => Dispatch(Choice.Skip);
+        CancelButton = b;
+        return b;
+    }
+
+    private static Button MakeBtn(string text, int y,
+        Color? backColor = null, Color? foreColor = null)
     {
         var b = new Button
         {
-            Text    = "דלג  Esc",
-            Height  = 38,
-            Location = new Point(0, y),
-            TabStop  = true,
+            Text      = text,
+            Height    = 38,
+            Location  = new Point(0, y),
+            TabStop   = true,
+            FlatStyle = backColor.HasValue ? FlatStyle.Flat : FlatStyle.Standard,
         };
-        b.Click += (_, _) => Dispatch(Choice.Skip);
-        CancelButton = b;
+        if (backColor.HasValue)
+        {
+            b.BackColor = backColor.Value;
+            b.ForeColor = foreColor ?? Color.White;
+            b.FlatAppearance.BorderSize = 0;
+        }
         return b;
     }
 
@@ -328,7 +282,6 @@ public sealed class DispatchForm : Form
 
     private void UpdateCustomerButton()
     {
-        // Find the שלח ללקוח button and en/disable it based on phone validity
         foreach (Control c in Controls)
         {
             if (c is Button b && b.Text.StartsWith("שלח ללקוח"))
@@ -404,7 +357,7 @@ public sealed class DispatchForm : Form
     {
         DispatchMode.CustomerNoPhone => "שליחת קבלה",
         DispatchMode.Order           => "שליחת הזמנה",
-        DispatchMode.Internal        => "דוח פנימי",
+        DispatchMode.Internal        => "הדפסה פנימית",
         _                            => "שליחת קבלה",
     };
 }

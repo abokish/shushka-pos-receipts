@@ -101,7 +101,6 @@ public sealed class Worker : BackgroundService
         }
 
         var docType = ReceiptParser.GetDocumentType(decoded);
-        string message = ReceiptParser.BuildMessage(decoded, _config);
         string summary = BuildSummaryLine(decoded, docType);
 
         _fileLogger.Log($"JOB | type={docType} | bytes={rawBytes.Length}");
@@ -109,16 +108,20 @@ public sealed class Worker : BackgroundService
         switch (docType)
         {
             case DocumentType.Receipt:
-                HandleReceipt(decoded, message, summary, rawBytes);
+                string receiptMsg = ReceiptParser.BuildMessage(decoded, _config);
+                HandleReceipt(decoded, receiptMsg, summary, rawBytes);
                 break;
 
             case DocumentType.Order:
+                string orderMsg   = ReceiptParser.BuildMessage(decoded, _config);
                 string? orderPhone = ReceiptParser.ExtractCustomerPhone(decoded, _config);
-                ShowDispatchForm(DispatchForm.DispatchMode.Order, summary, message, orderPhone, rawBytes, docType);
+                ShowDispatchForm(DispatchForm.DispatchMode.Order, summary, orderMsg, orderPhone, rawBytes, docType);
                 break;
 
             case DocumentType.Internal:
-                ShowDispatchForm(DispatchForm.DispatchMode.Internal, summary, message, null, rawBytes, docType);
+                // Show the raw decoded text so the cashier can read and decide.
+                // BuildMessage is designed for customer receipts — pass decoded directly.
+                ShowDispatchForm(DispatchForm.DispatchMode.Internal, summary, decoded, null, rawBytes, docType);
                 break;
         }
     }
