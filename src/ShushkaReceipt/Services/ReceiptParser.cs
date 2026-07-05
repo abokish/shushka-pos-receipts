@@ -4,8 +4,19 @@ using ShushkaReceipt.Config;
 
 namespace ShushkaReceipt.Services;
 
+public enum DocumentType { Receipt, Order, Internal }
+
 public static class ReceiptParser
 {
+    /// <summary>
+    /// Classifies a decoded print job.
+    /// חשבונית עסקה → Receipt; מספר הזמנה → Order; anything else → Internal.
+    /// </summary>
+    public static DocumentType GetDocumentType(string decoded) =>
+        decoded.Contains("חשבונית עסקה") ? DocumentType.Receipt :
+        decoded.Contains("מספר הזמנה")   ? DocumentType.Order   :
+                                            DocumentType.Internal;
+
     public static string? ExtractCustomerPhone(string decoded, ShushkaConfig config)
     {
         var lines = decoded.Split('\n');

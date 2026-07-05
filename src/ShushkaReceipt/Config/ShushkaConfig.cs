@@ -20,7 +20,13 @@ public sealed class ShushkaConfig
     // Thermal fallback printer — exact Windows printer name (e.g. "EPSON TM-T20III")
     public string ThermalPrinterName { get; set; } = "";
 
-    // When true and a customer phone is found: open WhatsApp silently, no popup.
-    // When false (default): popup always appears for every job.
+    // Routing phones — set via Settings form or auto-saved on first use
+    public string StorePhone { get; set; } = "";  // E.164, e.g. "972501234567"
+    public string OwnerPhone { get; set; } = "";  // E.164
+
+    // Folder for locally-saved print jobs (Z reports, orders, etc.)
+    public string LocalSavePath { get; set; } = @"C:\קופה\";
+
+    // Legacy: receipts now always auto-send when phone is found.
     public bool AutoSendIfPhoneKnown { get; set; } = false;
 }

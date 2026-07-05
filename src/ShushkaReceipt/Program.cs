@@ -6,7 +6,21 @@ using ShushkaReceipt.Services;
 
 Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
+// Config search order:
+//   1. C:\ProgramData\Shushka\appsettings.json  (production install)
+//   2. AppContext.BaseDirectory\appsettings.json  (development / portable)
+string programDataDir = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+    "Shushka");
+string configDir = File.Exists(Path.Combine(programDataDir, "appsettings.json"))
+    ? programDataDir
+    : AppContext.BaseDirectory;
+string configPath = Path.Combine(configDir, "appsettings.json");
+
 var builder = Host.CreateApplicationBuilder(args);
+
+builder.Configuration
+    .AddJsonFile(configPath, optional: false, reloadOnChange: false);
 
 builder.Services.AddWindowsService(options =>
     options.ServiceName = "ShushkaReceipt");
@@ -25,16 +39,11 @@ builder.Services.AddSingleton<FileJobLogger>(sp =>
     return new FileJobLogger(config.LogFilePath, config.LogMaxSizeBytes);
 });
 
-// ThermalPrinterService reads ThermalPrinterName from the live config
-// so settings changes take effect immediately.
 builder.Services.AddSingleton<ThermalPrinterService>(sp =>
     new ThermalPrinterService(sp.GetRequiredService<ShushkaConfig>()));
 
-// AppSettingsWriter persists settings changes back to appsettings.json.
 builder.Services.AddSingleton<AppSettingsWriter>(sp =>
-    new AppSettingsWriter(
-        Path.Combine(AppContext.BaseDirectory, "appsettings.json"),
-        sp.GetRequiredService<ShushkaConfig>()));
+    new AppSettingsWriter(configPath, sp.GetRequiredService<ShushkaConfig>()));
 
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddHostedService<TrayAndHotkeyService>();

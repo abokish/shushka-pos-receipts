@@ -22,11 +22,50 @@ public sealed class AppSettingsWriter
         _config = config;
     }
 
-    public void Save(bool autoSendIfPhoneKnown, string thermalPrinterName)
+    /// <summary>Full settings-form save: updates all user-configurable fields.</summary>
+    public void Save(
+        bool   autoSendIfPhoneKnown,
+        string thermalPrinterName,
+        string storePhone,
+        string ownerPhone,
+        string localSavePath)
     {
         _config.AutoSendIfPhoneKnown = autoSendIfPhoneKnown;
         _config.ThermalPrinterName   = thermalPrinterName;
+        _config.StorePhone           = storePhone;
+        _config.OwnerPhone           = ownerPhone;
+        _config.LocalSavePath        = localSavePath;
 
+        PatchJson(node =>
+        {
+            node["AutoSendIfPhoneKnown"] = autoSendIfPhoneKnown;
+            node["ThermalPrinterName"]   = thermalPrinterName;
+            node["StorePhone"]           = storePhone;
+            node["OwnerPhone"]           = ownerPhone;
+            node["LocalSavePath"]        = localSavePath;
+        });
+    }
+
+    /// <summary>
+    /// Saves the store phone on first use (when cashier enters it from the dispatch popup).
+    /// </summary>
+    public void SaveStorePhone(string phoneE164)
+    {
+        _config.StorePhone = phoneE164;
+        PatchJson(node => node["StorePhone"] = phoneE164);
+    }
+
+    /// <summary>
+    /// Saves the owner phone on first use (when cashier enters it from the dispatch popup).
+    /// </summary>
+    public void SaveOwnerPhone(string phoneE164)
+    {
+        _config.OwnerPhone = phoneE164;
+        PatchJson(node => node["OwnerPhone"] = phoneE164);
+    }
+
+    private void PatchJson(Action<JsonObject> patch)
+    {
         lock (_lock)
         {
             JsonObject root;
@@ -39,9 +78,7 @@ public sealed class AppSettingsWriter
                 root["Shushka"] = shushka;
             }
 
-            shushka["AutoSendIfPhoneKnown"] = autoSendIfPhoneKnown;
-            shushka["ThermalPrinterName"]   = thermalPrinterName;
-
+            patch(shushka);
             File.WriteAllText(_path, root.ToJsonString(JsonOptions));
         }
     }
