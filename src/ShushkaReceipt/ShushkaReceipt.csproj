@@ -14,4 +14,12 @@
     <PackageReference Include="System.Text.Encoding.CodePages" Version="10.0.9" />
   </ItemGroup>
 
+  <!-- Exclude dev-only and debug files from publish output -->
+  <ItemGroup>
+    <Content Update="appsettings.Development.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+  <PropertyGroup>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
 </Project>
