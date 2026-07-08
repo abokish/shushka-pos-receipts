@@ -54,10 +54,17 @@ public sealed class ThermalPrinterService
     /// Sends raw ESC/POS bytes to the configured thermal printer.
     /// Returns true on success, false if the printer name is not configured or Win32 fails.
     /// </summary>
+    // ESC/POS: GS V A 0 = partial cut with paper feed (EPSON TM compatible)
+    private static readonly byte[] CutCommand = [0x1D, 0x56, 0x41, 0x00];
+
     public bool PrintRaw(byte[] data)
     {
         string printerName = _config.ThermalPrinterName;
         if (string.IsNullOrWhiteSpace(printerName)) return false;
+
+        // Always append a cut command — the original job may not include one,
+        // and duplicate cuts are harmless on most thermal printers.
+        data = [..data, ..CutCommand];
 
         if (!OpenPrinter(printerName, out var hPrinter, IntPtr.Zero))
             return false;

@@ -100,6 +100,21 @@ public sealed class Worker : BackgroundService
             return;
         }
 
+        // Credit card transaction slip — cashier discards it, we do the same silently.
+        if (decoded.Contains("ספח כרטיס אשראי"))
+        {
+            _logger.LogInformation("Skipping credit card slip ({Bytes} bytes)", rawBytes.Length);
+            _fileLogger.Log($"SKIP_CC_SLIP | bytes={rawBytes.Length}");
+            return;
+        }
+
+        // Skip near-empty jobs — printer init sequences, status pings, etc.
+        if (decoded.Count(c => !char.IsWhiteSpace(c)) < 15)
+        {
+            _logger.LogInformation("Skipping near-empty job ({Bytes} bytes)", rawBytes.Length);
+            return;
+        }
+
         var docType = ReceiptParser.GetDocumentType(decoded);
         string summary = BuildSummaryLine(decoded, docType);
 
@@ -225,7 +240,7 @@ public sealed class Worker : BackgroundService
         }
 
         string? order = ExtractFirst(lines, @"מספר הזמנה\s+(\d+)");
-        string? inv   = ExtractFirst(lines, @"חשבונית עסקה\s+([\d/]+)");
+        string? inv   = ExtractFirst(lines, @"חשבונית (?:עסקה|מס[^\s]*)\s+([\d/]+)");
         string? total = ExtractFirst(lines, @"לתשלום\s+(\d+\.\d{2})");
 
         var parts = new List<string>();

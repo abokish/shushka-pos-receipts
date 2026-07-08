@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWindowsForms>true</UseWindowsForms>
+    <OutputType>WinExe</OutputType>
     <UserSecretsId>dotnet-ShushkaReceipt-ca6c8aae-ca34-43c7-835a-3fa48e883d20</UserSecretsId>
   </PropertyGroup>
 
@@ -17,6 +18,11 @@
   <!-- Exclude dev-only and debug files from publish output -->
   <ItemGroup>
     <Content Update="appsettings.Development.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
+  <!-- Include README in publish output -->
+  <ItemGroup>
+    <None Include="..\..\README.md" CopyToPublishDirectory="Always" Link="README.md" />
   </ItemGroup>
   <PropertyGroup>
     <DebugType>none</DebugType>

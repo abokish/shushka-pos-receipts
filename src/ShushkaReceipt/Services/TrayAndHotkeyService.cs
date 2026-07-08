@@ -110,6 +110,9 @@ public sealed class TrayAndHotkeyService : BackgroundService
             _trayIcon.DoubleClick += (_, _) => OpenSettings();
 
             appState.ListenerStatusChanged += OnListenerStatusChanged;
+
+            // Catch the case where the listener started before the handle existed.
+            HandleCreated += (_, _) => OnListenerStatusChanged(_appState.ListenerActive);
         }
 
         private void OpenSettings()

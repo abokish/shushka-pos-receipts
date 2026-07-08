@@ -13,9 +13,9 @@ public static class ReceiptParser
     /// חשבונית עסקה → Receipt; מספר הזמנה → Order; anything else → Internal.
     /// </summary>
     public static DocumentType GetDocumentType(string decoded) =>
-        decoded.Contains("חשבונית עסקה") ? DocumentType.Receipt :
-        decoded.Contains("מספר הזמנה")   ? DocumentType.Order   :
-                                            DocumentType.Internal;
+        decoded.Contains("חשבונית עסקה") || decoded.Contains("חשבונית מס") ? DocumentType.Receipt :
+        decoded.Contains("מספר הזמנה")                                      ? DocumentType.Order   :
+                                                                              DocumentType.Internal;
 
     public static string? ExtractCustomerPhone(string decoded, ShushkaConfig config)
     {
@@ -33,16 +33,24 @@ public static class ReceiptParser
 
         if (customerBlockStart < 0) return null;
 
-        for (int i = customerBlockStart; i < lines.Length; i++)
+        // Strip trailing colon/space from label: after bidi-fix the colon may land
+        // at a different position in the decoded line (e.g. "טלפון664224525 :")
+        // so we search for the Hebrew word only.
+        string label = config.CustomerPhoneLabel.TrimEnd(':', ' ');
+
+        for (int i = customerBlockStart; i < Math.Min(lines.Length, customerBlockStart + 10); i++)
         {
-            int labelIdx = lines[i].IndexOf(config.CustomerPhoneLabel, StringComparison.Ordinal);
-            if (labelIdx < 0) continue;
+            if (!lines[i].Contains(label)) continue;
 
-            // Take everything after the label (e.g. "543090412" or "052-1234567" or "")
-            string afterLabel = lines[i][(labelIdx + config.CustomerPhoneLabel.Length)..].Trim();
-            if (string.IsNullOrEmpty(afterLabel)) return null;
+            // Extract all digits from the line.
+            string digits = Regex.Replace(lines[i], @"\D", "");
+            if (string.IsNullOrEmpty(digits)) continue;
 
-            return ToE164(afterLabel);
+            // The POS may store lines in visual (fully-reversed) RTL order, so the
+            // digit sequence may be reversed compared to the actual phone number.
+            // Try both directions.
+            return ToE164(digits)
+                ?? ToE164(new string(digits.Reverse().ToArray()));
         }
 
         return null;
@@ -60,8 +68,9 @@ public static class ReceiptParser
         else if (digits.StartsWith("0"))
             digits = digits[1..];
 
-        // Israeli mobile NSN: 9 digits, starts with 5
-        if (digits.Length != 9 || !digits.StartsWith('5'))
+        // Israeli mobile NSN: 9 digits starting with 5 (standard).
+        // Accept 10 digits too — some POS systems store numbers without strict validation.
+        if (!digits.StartsWith('5') || digits.Length is < 9 or > 10)
             return null;
 
         return "972" + digits;
@@ -78,12 +87,13 @@ public static class ReceiptParser
 
         // Support order (מספר הזמנה) and transaction invoice (חשבונית עסקה)
         string? orderNum   = ExtractGroup(lines, @"מספר הזמנה\s+(\d+)", 1);
-        string? invoiceNum = ExtractGroup(lines, @"חשבונית עסקה\s+([\d/]+)", 1);
+        string? invoiceNum = ExtractGroup(lines, @"חשבונית (?:עסקה|מס[^\s]*)\s+([\d/]+)", 1);
 
         // תאריך and שעה may have a colon separator on some document types
-        string date  = ExtractGroup(lines, @"תאריך[:\s]+([\d/]+)",  1) ?? "";
-        string time  = ExtractGroup(lines, @"שעה[:\s]*([\d:]+)",    1) ?? "";
-        string total = ExtractGroup(lines, @"לתשלום\s+(\d+\.\d{2})", 1) ?? "";
+        string date    = ExtractGroup(lines, @"תאריך[:\s]+([\d/]+)",   1) ?? "";
+        string time    = ExtractGroup(lines, @"שעה[:\s]*([\d:]+)",    1) ?? "";
+        string total   = ExtractGroup(lines, @"לתשלום\s+(\d+\.\d{2})", 1) ?? "";
+        string? balance = ExtractGroup(lines, @"יתרה\s*(-?[\d]+\.[\d]{2})", 1);
 
         var items = ExtractItems(lines);
 
@@ -108,6 +118,14 @@ public static class ReceiptParser
 
         if (!string.IsNullOrEmpty(total))
             sb.AppendLine($"סה\"כ: ₪{total}");
+
+        if (!string.IsNullOrEmpty(balance))
+        {
+            bool negative = balance.StartsWith('-');
+            string absAmount = negative ? balance[1..] : balance;
+            string label = negative ? "זיכוי" : "יתרה לתשלום";
+            sb.AppendLine($"{label}: ₪{absAmount}");
+        }
 
         sb.Append(config.MessageClosing);
 

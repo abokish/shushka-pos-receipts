@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using ShushkaReceipt.Config;
 using ShushkaReceipt.Services;
@@ -146,7 +147,7 @@ public sealed class DispatchForm : Form
         var row2 = BuildRow(MakeRow2(mode, thermalConfigured, nextY));
         nextY += 44;
 
-        Height = nextY + 16;
+        ClientSize = new Size(ClientSize.Width, nextY + 16);
 
         Controls.Add(summaryLabel);
         foreach (var b in row1) Controls.Add(b);
@@ -164,6 +165,10 @@ public sealed class DispatchForm : Form
 
         if (mode != DispatchMode.Internal && prefilledPhoneE164 is null)
             ActiveControl = _phoneBox;
+
+        // Phone may have been pre-filled before buttons were added to Controls,
+        // so UpdateCustomerButton() missed it. Sync the button state now.
+        UpdateCustomerButton();
     }
 
     // ── Button rows ───────────────────────────────────────────────────────
@@ -351,6 +356,24 @@ public sealed class DispatchForm : Form
     {
         Result = choice;
         Close();
+    }
+
+    // ── Force foreground ──────────────────────────────────────────────────────
+    // Windows blocks focus-stealing from background threads. Attach to the
+    // foreground window's input queue briefly so SetForegroundWindow works.
+
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        // Simulate ALT press/release to acquire the foreground lock, then steal focus.
+        // This is the standard workaround for Windows focus-stealing protection.
+        keybd_event(0x12, 0, 0, UIntPtr.Zero);       // ALT down
+        SetForegroundWindow(Handle);
+        keybd_event(0x12, 0, 0x0002, UIntPtr.Zero);  // ALT up
+        Activate();
     }
 
     private static string ModeTitle(DispatchMode mode) => mode switch
